@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="nl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#08080c" />
+    <meta name="robots" content="noindex" />
+    <title>Glance</title>
+    <!--
+      Glance — telefoonpagina (GitHub Pages). Twee functies, gekozen via de QR-code op de tv:
+        ?m=kb&c=<sessie>      telefoon als toetsenbord: tekst gaat live naar de tv (Supabase realtime)
+        ?m=login&c=<code>     tv inloggen: log hier in, de tv wordt gekoppeld (edge function "pair")
+      Supabase-URL en publishable key worden bij het bouwen ingevuld (scripts/build-link-page.mjs);
+      die zijn publiek, de data is beschermd met Row Level Security.
+    -->
+    <style>
+      :root {
+        --bg: #08080c;
+        --card: #14141c;
+        --text: #f4f3f8;
+        --dim: #a3a1b3;
+        --accent: #8b6cff;
+        --accent-2: #ff5e87;
+        --ok: #7be3b0;
+        --err: #ff8a8a;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background: radial-gradient(ellipse at 50% 0%, #1a1230 0%, var(--bg) 60%) fixed;
+        color: var(--text);
+        font: 16px/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      }
+      main {
+        max-width: 520px;
+        margin: 0 auto;
+        padding: max(24px, env(safe-area-inset-top)) 20px 40px;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 24px;
+      }
+      header svg {
+        width: 40px;
+        height: 40px;
+      }
+      header strong {
+        font-size: 22px;
+        letter-spacing: -0.02em;
+      }
+      .card {
+        padding: 20px;
+        border-radius: 18px;
+        background: var(--card);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      h1 {
+        margin: 0 0 6px;
+        font-size: 22px;
+      }
+      p {
+        margin: 0 0 16px;
+        color: var(--dim);
+      }
+      label {
+        display: block;
+        margin: 0 0 6px;
+        color: var(--dim);
+        font-size: 14px;
+      }
+      input,
+      textarea {
+        width: 100%;
+        margin-bottom: 12px;
+        padding: 14px 16px;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--text);
+        font: inherit;
+        font-size: 18px;
+      }
+      textarea {
+        min-height: 120px;
+        resize: vertical;
+      }
+      input:focus,
+      textarea:focus {
+        outline: 2px solid var(--accent);
+        border-color: transparent;
+      }
+      button {
+        width: 100%;
+        padding: 14px 16px;
+        border: 0;
+        border-radius: 12px;
+        background: linear-gradient(90deg, var(--accent), var(--accent-2));
+        color: #fff;
+        font: inherit;
+        font-weight: 700;
+        font-size: 17px;
+      }
+      button.secondary {
+        margin-top: 10px;
+        background: rgba(255, 255, 255, 0.08);
+      }
+      button:disabled {
+        opacity: 0.5;
+      }
+      .status {
+        margin-top: 14px;
+        font-size: 14px;
+        color: var(--dim);
+      }
+      .ok {
+        color: var(--ok);
+      }
+      .err {
+        color: var(--err);
+      }
+      .big {
+        font-size: 48px;
+        text-align: center;
+      }
+      [hidden] {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <svg viewBox="0 0 512 512" aria-hidden="true">
+          <defs>
+            <linearGradient id="r" x1="0.15" y1="0.1" x2="0.85" y2="0.95">
+              <stop offset="0" stop-color="#8f6bff" />
+              <stop offset="0.5" stop-color="#ff4f9a" />
+              <stop offset="1" stop-color="#ffb347" />
+            </linearGradient>
+          </defs>
+          <rect width="512" height="512" rx="118" fill="#120c22" />
+          <path d="M 359 133 A 160 160 0 1 0 416 256 L 352 256" fill="none" stroke="url(#r)" stroke-width="50" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M 214 208 L 214 304 L 294 256 Z" fill="#fff" stroke="#fff" stroke-width="22" stroke-linejoin="round" />
+        </svg>
+        <strong>Glance</strong>
+      </header>
+
+      <!-- Telefoon als toetsenbord -->
+      <section id="kb" class="card" hidden>
+        <h1>Typ voor je tv</h1>
+        <p>Wat je hier typt, verschijnt meteen op de tv.</p>
+        <label id="kb-label" for="kb-input">Tekst</label>
+        <input id="kb-input" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        <button id="kb-send">Verstuur naar tv</button>
+        <div id="kb-status" class="status">Verbinden met je tv…</div>
+      </section>
+
+      <!-- Tv inloggen -->
+      <section id="login" class="card" hidden>
+        <h1>Tv koppelen</h1>
+        <p id="login-intro">Log in met je Glance-account. Je tv wordt daarna automatisch gekoppeld.</p>
+        <form id="login-form">
+          <label for="email">E-mailadres</label>
+          <input id="email" type="email" autocomplete="email" required />
+          <label for="password">Wachtwoord</label>
+          <input id="password" type="password" autocomplete="current-password" required minlength="6" />
+          <button type="submit">Inloggen en koppelen</button>
+          <button type="button" id="signup" class="secondary">Nieuw account maken</button>
+        </form>
+        <div id="login-done" hidden>
+          <div class="big">🎉</div>
+          <p class="ok">Je tv is gekoppeld. Je kunt dit venster sluiten.</p>
+        </div>
+        <div id="login-status" class="status"></div>
+      </section>
+
+      <!-- Zonder (geldige) QR-code -->
+      <section id="none" class="card" hidden>
+        <h1>Scan de QR-code op je tv</h1>
+        <p>Open Glance op je tv: bij een tekstveld kies je "📱 Telefoon", bij Instellingen → Account staat een QR-code om in te loggen.</p>
+      </section>
+    </main>
+
+    <script type="module">
+      import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/+esm';
+
+      const SUPABASE_URL = 'https://vmqybfenrheidfmkutmv.supabase.co';
+      const SUPABASE_KEY = 'sb_publishable_M3vQdhTCtFDwUnjdMyrFJg_FyQ6PMye';
+      const params = new URLSearchParams(location.search);
+      const mode = params.get('m');
+      const code = (params.get('c') ?? '').trim();
+      const $ = (id) => document.getElementById(id);
+      const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, storageKey: 'glance-link-auth' } });
+
+      if (mode === 'kb' && /^[a-z0-9]{8,32}$/.test(code)) startKeyboard();
+      else if (mode === 'login' && /^[A-Z0-9]{6}$/.test(code.toUpperCase())) startLogin();
+      else $('none').hidden = false;
+
+      function startKeyboard() {
+        $('kb').hidden = false;
+        const input = $('kb-input');
+        const status = $('kb-status');
+        if (params.get('l')) $('kb-label').textContent = params.get('l');
+        if (params.get('p') === '1') input.type = 'password';
+        let ready = false;
+        const channel = supabase.channel(`glance-kb-${code}`, { config: { broadcast: { self: false, ack: false } } });
+        channel.subscribe((state) => {
+          ready = state === 'SUBSCRIBED';
+          status.textContent = ready ? 'Verbonden met je tv ✓' : state === 'CHANNEL_ERROR' || state === 'TIMED_OUT' ? 'Geen verbinding — scan de QR-code opnieuw.' : 'Verbinden met je tv…';
+          status.className = `status ${ready ? 'ok' : state === 'CHANNEL_ERROR' ? 'err' : ''}`;
+          if (ready) input.focus();
+        });
+        const send = (payload) => ready && channel.send({ type: 'broadcast', event: 'msg', payload });
+        input.addEventListener('input', () => send({ text: input.value }));
+        const submit = () => {
+          send({ text: input.value, submit: true });
+          status.textContent = 'Verstuurd ✓';
+        };
+        $('kb-send').addEventListener('click', submit);
+        input.addEventListener('keydown', (e) => e.key === 'Enter' && submit());
+      }
+
+      async function startLogin() {
+        $('login').hidden = false;
+        const status = $('login-status');
+        const say = (text, kind = '') => {
+          status.textContent = text;
+          status.className = `status ${kind}`;
+        };
+        const approve = async () => {
+          say('Tv koppelen…');
+          const { error } = await supabase.functions.invoke('pair', { body: { action: 'approve', code: code.toUpperCase() } });
+          if (error) {
+            say('Deze code is onbekend of verlopen. Maak op de tv een nieuwe code.', 'err');
+            return;
+          }
+          $('login-form').hidden = true;
+          $('login-intro').hidden = true;
+          $('login-done').hidden = false;
+          say('');
+        };
+        const { data } = await supabase.auth.getSession();
+        if (data.session) {
+          $('login-intro').textContent = `Ingelogd als ${data.session.user.email}.`;
+          $('login-form').hidden = true;
+          await approve();
+          return;
+        }
+        $('login-form').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          say('Inloggen…');
+          const { error } = await supabase.auth.signInWithPassword({ email: $('email').value.trim(), password: $('password').value });
+          if (error) return say(/invalid/i.test(error.message) ? 'E-mail of wachtwoord klopt niet.' : error.message, 'err');
+          await approve();
+        });
+        $('signup').addEventListener('click', async () => {
+          if (!$('login-form').reportValidity()) return;
+          say('Account maken…');
+          const { data: res, error } = await supabase.auth.signUp({ email: $('email').value.trim(), password: $('password').value });
+          if (error) return say(error.message, 'err');
+          if (!res.session) return say('Account gemaakt. Bevestig je e-mail en log daarna hier in.', 'ok');
+          await approve();
+        });
+      }
+    </script>
+  </body>
+</html>
