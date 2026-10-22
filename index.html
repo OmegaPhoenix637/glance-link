@@ -154,11 +154,14 @@
       <!-- Telefoon als toetsenbord -->
       <section id="kb" class="card" hidden>
         <h1>Typ voor je tv</h1>
-        <p>Wat je hier typt, verschijnt meteen op de tv.</p>
+        <p>Wat je hier typt, verschijnt meteen op de tv. Je telefoon is gekoppeld: laat deze pagina open of zet hem op je beginscherm, dan hoef je nooit meer te scannen.</p>
         <label id="kb-label" for="kb-input">Tekst</label>
         <input id="kb-input" autocomplete="off" autocapitalize="off" spellcheck="false" />
         <button id="kb-send">Verstuur naar tv</button>
         <div id="kb-status" class="status">Verbinden met je tv…</div>
+        <p style="margin-top: 18px; font-size: 13px; opacity: 0.6">
+          <a href="#" id="kb-forget" style="color: inherit">Ontkoppelen op deze telefoon</a>
+        </p>
       </section>
 
       <!-- Tv inloggen -->
@@ -194,36 +197,76 @@
       const SUPABASE_KEY = 'sb_publishable_M3vQdhTCtFDwUnjdMyrFJg_FyQ6PMye';
       const params = new URLSearchParams(location.search);
       const mode = params.get('m');
-      const code = (params.get('c') ?? '').trim();
+      // Toetsenbord: de koppelcode onthouden, zodat je na één keer scannen altijd kunt typen.
+      const KB_SAVED = 'glance-kb-code';
+      let saved = null;
+      try {
+        saved = localStorage.getItem(KB_SAVED);
+      } catch {}
+      const code = (params.get('c') ?? (mode ? '' : (saved ?? ''))).trim();
       const $ = (id) => document.getElementById(id);
       const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, storageKey: 'glance-link-auth' } });
 
-      if (mode === 'kb' && /^[a-z0-9]{8,32}$/.test(code)) startKeyboard();
+      if ((mode === 'kb' || (!mode && saved)) && /^[a-z0-9]{8,32}$/.test(code)) startKeyboard();
       else if (mode === 'login' && /^[A-Z0-9]{6}$/.test(code.toUpperCase())) startLogin();
       else $('none').hidden = false;
 
       function startKeyboard() {
         $('kb').hidden = false;
+        try {
+          localStorage.setItem(KB_SAVED, code);
+        } catch {}
+        // Adresbalk zonder code (zo kun je hem veilig als bladwijzer/beginscherm bewaren).
+        if (params.get('c')) history.replaceState(null, '', location.pathname);
         const input = $('kb-input');
         const status = $('kb-status');
-        if (params.get('l')) $('kb-label').textContent = params.get('l');
-        if (params.get('p') === '1') input.type = 'password';
+        const say = (text, kind = '') => {
+          status.textContent = text;
+          status.className = `status ${kind}`;
+        };
         let ready = false;
+        let tvOpen = false;
         const channel = supabase.channel(`glance-kb-${code}`, { config: { broadcast: { self: false, ack: false } } });
+        const send = (payload) => ready && channel.send({ type: 'broadcast', event: 'msg', payload });
+        // De tv meldt welk veld er open staat (of dat het weer dicht is).
+        channel.on('broadcast', { event: 'msg' }, ({ payload }) => {
+          if (!payload) return;
+          if (payload.open) {
+            tvOpen = true;
+            $('kb-label').textContent = payload.label || 'Tekst';
+            input.type = payload.password ? 'password' : 'text';
+            input.value = typeof payload.text === 'string' ? payload.text : '';
+            say(`Typ voor: ${payload.label || 'de tv'}`, 'ok');
+            input.focus();
+          } else if (payload.open === false) {
+            tvOpen = false;
+            say('Klaar. Open op de tv een tekstveld (OK) om weer te typen.');
+          }
+        });
         channel.subscribe((state) => {
           ready = state === 'SUBSCRIBED';
-          status.textContent = ready ? 'Verbonden met je tv ✓' : state === 'CHANNEL_ERROR' || state === 'TIMED_OUT' ? 'Geen verbinding — scan de QR-code opnieuw.' : 'Verbinden met je tv…';
-          status.className = `status ${ready ? 'ok' : state === 'CHANNEL_ERROR' ? 'err' : ''}`;
-          if (ready) input.focus();
+          if (ready) {
+            say('Verbonden ✓ Open op de tv een tekstveld (OK) om te typen.', 'ok');
+            send({ hello: true });
+          } else if (state === 'CHANNEL_ERROR' || state === 'TIMED_OUT') say('Geen verbinding. Even wachten of de pagina vernieuwen.', 'err');
+          else say('Verbinden met je tv…');
         });
-        const send = (payload) => ready && channel.send({ type: 'broadcast', event: 'msg', payload });
+        // Terug naar deze pagina (scherm weer aan): opnieuw hallo zeggen.
+        document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && send({ hello: true }));
         input.addEventListener('input', () => send({ text: input.value }));
         const submit = () => {
           send({ text: input.value, submit: true });
-          status.textContent = 'Verstuurd ✓';
+          say(tvOpen ? 'Verstuurd ✓' : 'Verstuurd. Staat er op de tv geen tekstveld open? Druk daar eerst op OK.', 'ok');
         };
         $('kb-send').addEventListener('click', submit);
         input.addEventListener('keydown', (e) => e.key === 'Enter' && submit());
+        $('kb-forget').addEventListener('click', (e) => {
+          e.preventDefault();
+          try {
+            localStorage.removeItem(KB_SAVED);
+          } catch {}
+          location.href = location.pathname;
+        });
       }
 
       async function startLogin() {
